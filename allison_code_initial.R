@@ -1,6 +1,6 @@
 
-#Loading in the data
-#data <- read.csv("RW18_28_stdyPLOTlong.csv", header = T)
+Loading in the data
+data <- read.csv("RW18_28_stdyPLOTlong.csv", header = T)
 
 #install.packages("readxl")
 library(readxl)
@@ -32,12 +32,3 @@ main_combine <- first_combined %>%
 
 
 #Yay, looks like main_combine has the proper data now!
-
-#Reading in the shape files
-library(sf)
-plot_shapes <- st_read("Regionwide28_18plots.shp", options = "ENCODING=UTF-8")
-
-library(ggplot2)
-ggplot(plot_shapes[1:40,]) +
-  geom_sf() +
-  theme_minimal()
