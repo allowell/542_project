@@ -1,5 +1,6 @@
 
 #install.packages("readxl")
+library(tidyverse)
 library(readxl)
 library(ggplot2)
 
@@ -17,28 +18,28 @@ par(mfrow=c(2,2))
 plot(model_ols)  # Residuals vs Fitted, QQ plot, etc.
 
 #Running a OLS Model for Study=282201
-model_ols <- lm(ht ~ totp + estabp + totp:estabp + yst, data = hyp1[(hyp1$stdy==282201),])
+model_ols <- lm(ht ~ totp + estabp + totp:estabp + as.factor(yst), data = hyp1[(hyp1$stdy==282201),])
 summary(model_ols)
 #Checking diagnostics
 par(mfrow=c(2,2))
 plot(model_ols)  # Residuals vs Fitted, QQ plot, etc.
 
 #Running a OLS Model for Study=281303
-model_ols <- lm(ht ~ totp + estabp + totp:estabp + yst, data = hyp1[(hyp1$stdy==281303),])
+model_ols <- lm(ht ~ totp + estabp + totp:estabp + as.factor(yst), data = hyp1[(hyp1$stdy==281303),])
 summary(model_ols)
 #Checking diagnostics
 par(mfrow=c(2,2))
 plot(model_ols)  # Residuals vs Fitted, QQ plot, etc.
 
 #Running a OLS Model for Study=282401
-model_ols <- lm(ht ~ totp + estabp + totp:estabp + yst, data = hyp1[(hyp1$stdy==282401),])
+model_ols <- lm(ht ~ totp + estabp + totp:estabp + as.factor(yst), data = hyp1[(hyp1$stdy==282401),])
 summary(model_ols)
 #Checking diagnostics
 par(mfrow=c(2,2))
 plot(model_ols)  # Residuals vs Fitted, QQ plot, etc.
 
 #Running a OLS Model for Study=284201
-model_ols <- lm(ht ~ totp + estabp + totp:estabp + yst, data = hyp1[(hyp1$stdy==284201),])
+model_ols <- lm(ht ~ totp + estabp + totp:estabp + as.factor(yst), data = hyp1[(hyp1$stdy==284201),])
 summary(model_ols)
 #Checking diagnostics
 par(mfrow=c(2,2))
