@@ -1,10 +1,11 @@
+# Load required libraries
 library(shiny)
 library(readxl)
 library(ggplot2)
 library(dplyr)
 
 ui <- fluidPage(
-  titlePanel("OLS Model Builder from Excel Data"),
+  titlePanel("Model Builder: OLS vs GLM Gamma (log link)"),
   
   sidebarLayout(
     sidebarPanel(
@@ -16,12 +17,23 @@ ui <- fluidPage(
       
       uiOutput("response_ui"),
       uiOutput("predictors_ui"),
-      actionButton("run_model", "Run OLS Model")
+      actionButton("run_models", "Run Models")
     ),
     
     mainPanel(
-      verbatimTextOutput("model_summary"),
-      plotOutput("diagnostic_plots")
+      tabsetPanel(
+        tabPanel("OLS Model",
+                 verbatimTextOutput("model_summary_ols"),
+                 plotOutput("diagnostic_plots_ols")
+        ),
+        tabPanel("GLM Gamma (log link)",
+                 verbatimTextOutput("model_summary_gamma"),
+                 plotOutput("diagnostic_plots_gamma")
+        ),
+        tabPanel("Model Comparison (AIC)",
+                 verbatimTextOutput("model_comparison")
+        )
+      )
     )
   )
 )
@@ -59,37 +71,77 @@ server <- function(input, output, session) {
     data_input() |> filter(stdy == input$stdy_filter, yst == input$yst_filter)
   })
   
-  # Response variable selection
+  # Response variable selection limited to dbh, ht, vol
   output$response_ui <- renderUI({
     req(filtered_data())
-    selectInput("response", "Select Response Variable", choices = names(filtered_data()), selected = "ht")
+    selectInput("response", "Select Response Variable", 
+                choices = c("dbh", "ht", "vol"), 
+                selected = "ht")
   })
   
-  # Predictor variable selection
+  # Predictor variable selection limited to stdy, plot, yst, cump, totp, estabp
   output$predictors_ui <- renderUI({
     req(filtered_data(), input$response)
-    choices <- setdiff(names(filtered_data()), c("stdy", "plot", "yst", input$response))
+    choices <- c("stdy", "plot", "yst", "cump", "totp", "estabp")
     checkboxGroupInput("predictors", "Select Predictor Variables", choices = choices)
   })
   
-  # Fit OLS model
-  model_result <- eventReactive(input$run_model, {
+  # Fit both models
+  models_result <- eventReactive(input$run_models, {
     req(input$response, input$predictors)
     formula_text <- paste(input$response, "~", paste(input$predictors, collapse = " + "))
-    lm(as.formula(formula_text), data = filtered_data())
+    
+    df <- filtered_data()
+    
+    model_ols <- lm(as.formula(formula_text), data = df)
+    model_gamma <- glm(as.formula(formula_text), data = df, family = Gamma(link = "log"))
+    
+    list(ols = model_ols, gamma = model_gamma)
   })
   
-  # Display model summary
-  output$model_summary <- renderPrint({
-    req(model_result())
-    summary(model_result())
+  # Display OLS summary
+  output$model_summary_ols <- renderPrint({
+    req(models_result())
+    summary(models_result()$ols)
   })
   
-  # Diagnostic plots
-  output$diagnostic_plots <- renderPlot({
-    req(model_result())
+  # OLS diagnostic plots
+  output$diagnostic_plots_ols <- renderPlot({
+    req(models_result())
     par(mfrow = c(2, 2))
-    plot(model_result())
+    plot(models_result()$ols)
+  })
+  
+  # Display Gamma model summary
+  output$model_summary_gamma <- renderPrint({
+    req(models_result())
+    summary(models_result()$gamma)
+  })
+  
+  # Gamma diagnostic plots
+  output$diagnostic_plots_gamma <- renderPlot({
+    req(models_result())
+    par(mfrow = c(2, 2))
+    plot(models_result()$gamma)
+  })
+  
+  # Model AIC comparison with interpretation
+  output$model_comparison <- renderPrint({
+    req(models_result())
+    aic_values <- AIC(models_result()$ols, models_result()$gamma)
+    print(aic_values)
+    
+    ols_aic <- aic_values$AIC[1]
+    gamma_aic <- aic_values$AIC[2]
+    
+    cat("\nModel Comparison Conclusion:\n")
+    if (ols_aic < gamma_aic) {
+      cat("OLS model has the lower AIC and is therefore preferred based on AIC.\n")
+    } else if (gamma_aic < ols_aic) {
+      cat("GLM Gamma (log link) model has the lower AIC and is therefore preferred based on AIC.\n")
+    } else {
+      cat("Both models have identical AIC values.\n")
+    }
   })
 }
 
