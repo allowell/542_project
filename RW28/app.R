@@ -3,6 +3,7 @@ library(shiny)
 library(readxl)
 library(ggplot2)
 library(dplyr)
+library(ggplot2)
 
 ui <- fluidPage(
   titlePanel("Model Builder: OLS vs GLM Gamma (log link)"),
@@ -11,18 +12,38 @@ ui <- fluidPage(
     sidebarPanel(
       fileInput("file", "Upload Excel File (.xlsx)", accept = ".xlsx"),
       textInput("sheet", "Sheet Name", value = "plot data"),
+
+      # Makes the Data Exploration tab sidebar different than the rest (lots of NA inputs)
+      conditionalPanel(
+        condition = "input.main_tabs == 'Data Exploration'",
+        selectInput("xvar", "X-axis variable for Interactive Plot:",
+                    choices = NULL),  # we'll update choices server-side
+        selectInput("yvar", "Y-axis variable for Interactive Plot:", choices = NULL)
+      ),
       
-      uiOutput("stdy_ui"),
-      uiOutput("yst_ui"),
-      
-      uiOutput("response_ui"),
-      uiOutput("predictors_ui"),
-      
-      actionButton("run_models", "Run Models")
+      # Makes the rest of the tabs have the identical sidebar initially put into the app
+      conditionalPanel(
+        condition = "input.main_tabs != 'Data Exploration'",
+        uiOutput("stdy_ui"),
+        uiOutput("yst_ui"),
+        
+        uiOutput("response_ui"),
+        uiOutput("predictors_ui"),
+        
+        actionButton("run_models", "Run Models")
+      )
     ),
     
     mainPanel(
       tabsetPanel(
+        id = "main_tabs",
+        tabPanel("Data Exploration",
+                 h3("Big Picture Plots"),
+                 plotOutput("height_over_time"),
+                 plotOutput("dbh_over_time"),
+                 hr(),
+                 h3("Interactive Plot"),
+                 plotOutput("custom_plot")),
         tabPanel("OLS Model",
                  verbatimTextOutput("model_summary_ols"),
                  plotOutput("diagnostic_plots_ols")
@@ -52,8 +73,44 @@ server <- function(input, output, session) {
       )
     df
   })
+
+  # Creating static big picture plots (for big picture plots - tab 1)
+  output$height_over_time <- renderPlot({
+    req(data_input())
+    ggplot(data_input(), aes(x = yst, y = ht)) +
+      geom_point(alpha = 0.5) +
+      labs(title = "Height over Time", x = "Year", y = "Height")
+  })
   
-  # Dynamic UI for stdy selection
+  output$dbh_over_time <- renderPlot({
+    req(data_input())
+    ggplot(data_input(), aes(x = yst, y = dbh)) +
+      geom_point(alpha = 0.5) +
+      labs(title = "DBH over Time", x = "Year", y = "DBH")
+  })
+  
+  
+  # UI for selecting custom x and y variables (for interactive plot)
+  output$xvar_ui <- renderUI({
+    req(data_input())
+    selectInput("xvar", "X-axis variable:", choices = names(data_input()))
+  })
+  
+  output$yvar_ui <- renderUI({
+    req(data_input())
+    selectInput("yvar", "Y-axis variable:", choices = names(data_input()))
+  })
+  
+  # Creating dynamic plot - tab 1
+  output$custom_plot <- renderPlot({
+    req(data_input(), input$xvar, input$yvar)
+    ggplot(data_input(), aes_string(x = input$xvar, y = input$yvar)) +
+      geom_point(alpha = 1) +
+      labs(title = paste(input$yvar, "vs", input$xvar))
+  })
+  
+  
+  # Dynamic UI for study selection
   output$stdy_ui <- renderUI({
     req(data_input())
     selectInput("stdy_filter", "Select Study (stdy)", choices = unique(data_input()$stdy))
