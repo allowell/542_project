@@ -17,6 +17,9 @@ ui <- fluidPage(
       
       uiOutput("response_ui"),
       uiOutput("predictors_ui"),
+      
+      checkboxInput("include_interaction", "estabp * totp", value = FALSE),
+      
       actionButton("run_models", "Run Models")
     ),
     
@@ -89,7 +92,16 @@ server <- function(input, output, session) {
   # Fit both models
   models_result <- eventReactive(input$run_models, {
     req(input$response, input$predictors)
-    formula_text <- paste(input$response, "~", paste(input$predictors, collapse = " + "))
+    
+    # Build formula text
+    formula_terms <- input$predictors
+    
+    # Add interaction term if checkbox is checked
+    if (input$include_interaction) {
+      formula_terms <- c(formula_terms, "estabp:totp")
+    }
+    
+    formula_text <- paste(input$response, "~", paste(formula_terms, collapse = " + "))
     
     df <- filtered_data()
     
@@ -146,4 +158,5 @@ server <- function(input, output, session) {
 }
 
 shinyApp(ui, server)
+
 
