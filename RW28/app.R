@@ -155,7 +155,20 @@ server <- function(input, output, session) {
   output$resp_over_time <- renderPlot({
     req(data_input(), input$response_var, input$color_var)
     
-    gg <- ggplot(data_input(), aes_string(x = "yst", y = input$response_var))
+    df <- data_input()
+
+    # Filtering based on checkbox group status (no filtering if color variable is none)
+    if (input$color_var != "None") {
+      req(input$var_on_plot)
+      df <- df %>% filter(.data[[input$color_var]] %in% input$var_on_plot)
+    }
+    
+    # Labels for the variable selected to use for title, ylab, and legend
+    response_label <- names(response_choices)[response_choices == input$response_var]
+    color_label <- if (input$color_var == "None") NULL else names(color_choices)[color_choices == input$color_var]
+    
+    # Start plot
+    gg <- ggplot(df, aes_string(x = "yst", y = input$response_var))
     
     if (input$color_var == "None") {
       gg <- gg + geom_point(color = "black", alpha = 0.6)
@@ -164,10 +177,10 @@ server <- function(input, output, session) {
     }
     
     gg <- gg + labs(
-      title = paste(input$response_var, "Over Time"),
+      title = paste(response_label, "Over Time"),
       x = "Year",
-      y = input$response_var,
-      color = if (input$color_var == "None") NULL else input$color_var
+      y = response_label,
+      color = if (input$color_var == "None") NULL else color_label
     )
     
     gg
