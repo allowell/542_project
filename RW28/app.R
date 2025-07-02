@@ -16,6 +16,13 @@ ui <- fluidPage(
       # Makes the Data Exploration tab sidebar different than the rest (lots of NA inputs)
       conditionalPanel(
         condition = "input.main_tabs == 'Data Exploration'",
+        helpText("Plot 1 Options:"),
+        selectInput("response_var", "Select Response variable:", 
+                    choices = c("ht", "dbh", "vol"), selected = "ht"),
+        
+        selectInput("color_var", "Color by:", choices = c("stdy", "plot", "TRT_CODE", "yst")),
+        helpText("Plot 2 Options:"),
+        helpText("Plot 3 Options:"),
         selectInput("xvar", "X-axis variable for Interactive Plot:",
                     choices = NULL),  # we'll update choices server-side
         selectInput("yvar", "Y-axis variable for Interactive Plot:", choices = NULL)
@@ -38,11 +45,11 @@ ui <- fluidPage(
       tabsetPanel(
         id = "main_tabs",
         tabPanel("Data Exploration",
-                 h3("Big Picture Plots"),
-                 plotOutput("height_over_time"),
-                 plotOutput("dbh_over_time"),
+                 h3("Plot 1 - Response Over Time"),
+                 plotOutput("resp_over_time"),
+                 plotOutput("treat_minus_cntrl"),
                  hr(),
-                 h3("Interactive Plot"),
+                 h3("Plot 2 - Interactive"),
                  plotOutput("custom_plot")),
         tabPanel("OLS Model",
                  verbatimTextOutput("model_summary_ols"),
@@ -73,20 +80,24 @@ server <- function(input, output, session) {
       )
     df
   })
+  
+  # Dynamically getting the options to color the points by factor variables - plot 1
+  observeEvent(data_input(), {
+    categorical_vars <- names(Filter(function(x) is.factor(x) || is.character(x), data_input()))
+    updateSelectInput(session, "color_var", choices = categorical_vars, selected = categorical_vars[1])
+  })
 
-  # Creating static big picture plots (for big picture plots - tab 1)
-  output$height_over_time <- renderPlot({
+  # Creating response over time plot - plot 1 in tab 1
+  output$resp_over_time <- renderPlot({
     req(data_input())
-    ggplot(data_input(), aes(x = yst, y = ht)) +
+    ggplot(data_input(), aes_string(x = "yst", y = input$response_var, color = input$color_var)) +
       geom_point(alpha = 0.5) +
-      labs(title = "Height over Time", x = "Year", y = "Height")
+      labs(title = paste(input$response_var, "over Time"), x = "Year", y = input$response_var)
   })
   
-  output$dbh_over_time <- renderPlot({
+  output$treat_minus_cntrl <- renderPlot({
     req(data_input())
-    ggplot(data_input(), aes(x = yst, y = dbh)) +
-      geom_point(alpha = 0.5) +
-      labs(title = "DBH over Time", x = "Year", y = "DBH")
+    ggplot(data_input(), aes())
   })
   
   
