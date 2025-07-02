@@ -5,27 +5,69 @@ library(ggplot2)
 library(dplyr)
 library(ggplot2)
 
+# Labels used for plots
+
+response_choices <- c("Height" = "ht", "DBH" = "dbh", "Volume" = "vol")
+
+color_choices <- c(
+  "None" = "None",
+  "Treatment Code" = "TRT_CODE",
+  "Plot (factor)" = "plot_fac",
+  "Study (factor)" = "stdy_fac"
+)
+
+label_lookup <- c(
+  ht = "Height",
+  dbh = "DBH",
+  vol = "Volume",
+  TRT_CODE = "Treatment Code",
+  plot_fac = "Plot",
+  stdy_fac = "Study"
+)
+
+
+
 ui <- fluidPage(
   titlePanel("Model Builder: OLS vs GLM Gamma (log link)"),
   
   sidebarLayout(
     sidebarPanel(
-      fileInput("file", "Upload Excel File (.xlsx)", accept = ".xlsx"),
-      textInput("sheet", "Sheet Name", value = "plot data"),
+      fileInput(inputId = "file",
+                label = "Upload Excel File (.xlsx)",
+                accept = ".xlsx"),
+      textInput(inputId = "sheet",
+                label = "Sheet Name",
+                value = "plot data"),
 
       # Makes the Data Exploration tab sidebar different than the rest (lots of NA inputs)
       conditionalPanel(
         condition = "input.main_tabs == 'Data Exploration'",
         helpText("Plot 1 Options:"),
-        selectInput("response_var", "Select Response variable:", 
-                    choices = c("ht", "dbh", "vol"), selected = "ht"),
+        selectInput(inputId = "response_var",
+                    label = "Select response variable:", 
+                    choices = response_choices,
+                    selected = "None"),
         
-        selectInput("color_var", "Color by:", choices = c("stdy", "plot", "TRT_CODE", "yst")),
+        selectInput(inputId = "color_var",
+                    label = "Color plotted points by:",
+                    choices = color_choices,
+                    selected = "None"),
+        
+        conditionalPanel(
+          condition = "input.color_var != 'None'",
+          checkboxGroupInput(inputId = "var_on_plot",
+                             label = "Show the following on plot:",
+                             choices = NULL,
+                             selected = NULL)),
+        
         helpText("Plot 2 Options:"),
         helpText("Plot 3 Options:"),
-        selectInput("xvar", "X-axis variable for Interactive Plot:",
+        selectInput(inputId = "xvar",
+                    label = "X-axis variable for Interactive Plot:",
                     choices = NULL),  # we'll update choices server-side
-        selectInput("yvar", "Y-axis variable for Interactive Plot:", choices = NULL)
+        selectInput(inputId = "yvar",
+                    label = "Y-axis variable for Interactive Plot:",
+                    choices = NULL)
       ),
       
       # Makes the rest of the tabs have the identical sidebar initially put into the app
@@ -45,11 +87,13 @@ ui <- fluidPage(
       tabsetPanel(
         id = "main_tabs",
         tabPanel("Data Exploration",
-                 h3("Plot 1 - Response Over Time"),
+                 h3("Plot 1: Response Over Time"),
                  plotOutput("resp_over_time"),
+                 hr(),
+                 h3("Plot 2: Treatment - Control"),
                  plotOutput("treat_minus_cntrl"),
                  hr(),
-                 h3("Plot 2 - Interactive"),
+                 h3("Plot 3: Interactive"),
                  plotOutput("custom_plot")),
         tabPanel("OLS Model",
                  verbatimTextOutput("model_summary_ols"),
@@ -76,24 +120,63 @@ server <- function(input, output, session) {
       select(stdy, plot, yst, cump, totp, dbh, ht, vol) |>
       mutate(
         estabp = totp - cump,
-        TRT_CODE = substr(plot, 2, 4)
+        TRT_CODE = substr(plot, 2, 4),
+        stdy_fac = as.factor(stdy),
+        plot_fac = as.factor(plot)
       )
+    
     df
   })
   
-  # Dynamically getting the options to color the points by factor variables - plot 1
-  observeEvent(data_input(), {
-    categorical_vars <- names(Filter(function(x) is.factor(x) || is.character(x), data_input()))
-    updateSelectInput(session, "color_var", choices = categorical_vars, selected = categorical_vars[1])
+  # Dynamically getting the options to include the "color by" variable - plot 1
+  observeEvent({
+    input$color_var
+    data_input()
+  }, {
+    req(data_input(), input$color_var)
+    
+    # Only update checkboxes if color_var is not "None"
+    if (input$color_var != "None") {
+      var_vals <- as.character(data_input()[[input$color_var]])
+      var_options <- sort(unique(var_vals))
+      
+      updateCheckboxGroupInput(
+        session, "var_on_plot",
+        choices = var_options,
+        selected = var_options
+      )
+    } else {
+      updateCheckboxGroupInput(session, "var_on_plot", choices = character(0), selected = character(0))
+    }
   })
+  
 
   # Creating response over time plot - plot 1 in tab 1
   output$resp_over_time <- renderPlot({
-    req(data_input())
-    ggplot(data_input(), aes_string(x = "yst", y = input$response_var, color = input$color_var)) +
-      geom_point(alpha = 0.5) +
-      labs(title = paste(input$response_var, "over Time"), x = "Year", y = input$response_var)
+    req(data_input(), input$response_var, input$color_var)
+    
+    gg <- ggplot(data_input(), aes_string(x = "yst", y = input$response_var))
+    
+    if (input$color_var == "None") {
+      gg <- gg + geom_point(color = "black", alpha = 0.6)
+    } else {
+      gg <- gg + geom_point(aes_string(color = input$color_var), alpha = 0.6)
+    }
+    
+    gg <- gg + labs(
+      title = paste(input$response_var, "Over Time"),
+      x = "Year",
+      y = input$response_var,
+      color = if (input$color_var == "None") NULL else input$color_var
+    )
+    
+    gg
   })
+  
+  
+  
+  
+  
   
   output$treat_minus_cntrl <- renderPlot({
     req(data_input())
@@ -104,7 +187,7 @@ server <- function(input, output, session) {
   # UI for selecting custom x and y variables (for interactive plot)
   output$xvar_ui <- renderUI({
     req(data_input())
-    selectInput("xvar", "X-axis variable:", choices = names(data_input()))
+    updateSelectInput(session, "xvar", "X-axis variable:", choices = names(data_input()))
   })
   
   output$yvar_ui <- renderUI({
@@ -112,12 +195,12 @@ server <- function(input, output, session) {
     selectInput("yvar", "Y-axis variable:", choices = names(data_input()))
   })
   
-  # Creating dynamic plot - tab 1
+  # Creating dynamic plot - tab 1 plot 3
   output$custom_plot <- renderPlot({
     req(data_input(), input$xvar, input$yvar)
-    ggplot(data_input(), aes_string(x = input$xvar, y = input$yvar)) +
+    ggplot(data_input(), aes_string(x = input$xvar_ui, y = input$yvar_ui)) +
       geom_point(alpha = 1) +
-      labs(title = paste(input$yvar, "vs", input$xvar))
+      labs(title = paste(input$yvar_ui, "vs", input$xvar_ui))
   })
   
   
