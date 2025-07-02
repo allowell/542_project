@@ -7,7 +7,9 @@ library(ggplot2)
 
 # Labels used for plots
 
-response_choices <- c("Height" = "ht", "DBH" = "dbh", "Volume" = "vol")
+response_choices <- c("Height" = "ht",
+                      "DBH" = "dbh",
+                      "Volume" = "vol")
 
 color_choices <- c(
   "None" = "None",
@@ -16,14 +18,24 @@ color_choices <- c(
   "Study (factor)" = "stdy_fac"
 )
 
+
 label_lookup <- c(
   ht = "Height",
   dbh = "DBH",
   vol = "Volume",
+  cump = "Cumulative Phosphorus",
+  totp = "Total Phosphorus",
+  estabp = "Established Phosphorus",
+  yst = "Year",
+  stdy = "Study",
+  plot = "Plot",
   TRT_CODE = "Treatment Code",
-  plot_fac = "Plot",
-  stdy_fac = "Study"
+  stdy = "Study",
+  stdy_fac = "Study (factor)",
+  plot = "Plot",
+  plot_fac = "Plot (factor)"
 )
+
 
 
 
@@ -38,11 +50,16 @@ ui <- fluidPage(
       textInput(inputId = "sheet",
                 label = "Sheet Name",
                 value = "plot data"),
+      
+      tags$br(),
+      tags$br(), # spaces for readability
 
       # Makes the Data Exploration tab sidebar different than the rest (lots of NA inputs)
       conditionalPanel(
         condition = "input.main_tabs == 'Data Exploration'",
+        
         helpText("Plot 1 Options:"),
+        
         selectInput(inputId = "response_var",
                     label = "Select response variable:", 
                     choices = response_choices,
@@ -59,15 +76,31 @@ ui <- fluidPage(
                              label = "Show the following on plot:",
                              choices = NULL,
                              selected = NULL)),
+        tags$br(),
+        tags$br(),
+        tags$br(),
         
         helpText("Plot 2 Options:"),
+        
+        selectInput(inputId = "response_var2",
+                    label = "Select response variable:", 
+                    choices = response_choices,
+                    selected = "None"),
+        
+        tags$br(),
+        tags$br(),
+        tags$br(),
+        
         helpText("Plot 3 Options:"),
+        
         selectInput(inputId = "xvar",
                     label = "X-axis variable for Interactive Plot:",
-                    choices = NULL),  # we'll update choices server-side
+                    choices = NULL),  # initial empty choices
+        
         selectInput(inputId = "yvar",
                     label = "Y-axis variable for Interactive Plot:",
                     choices = NULL)
+        
       ),
       
       # Makes the rest of the tabs have the identical sidebar initially put into the app
@@ -187,34 +220,41 @@ server <- function(input, output, session) {
   })
   
   
-  
-  
-  
-  
+  # Treatment - Control Plot 2
   output$treat_minus_cntrl <- renderPlot({
     req(data_input())
     ggplot(data_input(), aes())
   })
-  
-  
-  # UI for selecting custom x and y variables (for interactive plot)
-  output$xvar_ui <- renderUI({
-    req(data_input())
-    updateSelectInput(session, "xvar", "X-axis variable:", choices = names(data_input()))
+
+  # Updates available X and Y variables for interactive plot - plot 3
+  observeEvent(data_input(), {
+    vars <- names(data_input())
+    updateSelectInput(session, "xvar", choices = vars, selected = vars[1])
+    updateSelectInput(session, "yvar", choices = vars, selected = vars[2])
   })
-  
-  output$yvar_ui <- renderUI({
-    req(data_input())
-    selectInput("yvar", "Y-axis variable:", choices = names(data_input()))
-  })
+
   
   # Creating dynamic plot - tab 1 plot 3
   output$custom_plot <- renderPlot({
     req(data_input(), input$xvar, input$yvar)
-    ggplot(data_input(), aes_string(x = input$xvar_ui, y = input$yvar_ui)) +
+    
+    # Look up friendly labels, fall back to variable name if not found
+    x_label <- label_lookup[[input$xvar]]
+    if (is.null(x_label)) x_label <- input$xvar
+    
+    y_label <- label_lookup[[input$yvar]]
+    if (is.null(y_label)) y_label <- input$yvar
+    
+    ggplot(data_input(), aes_string(x = input$xvar, y = input$yvar)) +
       geom_point(alpha = 1) +
-      labs(title = paste(input$yvar_ui, "vs", input$xvar_ui))
+      labs(
+        title = paste(y_label, "vs", x_label),
+        x = x_label,
+        y = y_label
+      )
   })
+  
+  
   
   
   # Dynamic UI for study selection
