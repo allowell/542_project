@@ -33,7 +33,7 @@ label_lookup <- c(
 )
 
 ui <- fluidPage(
-  titlePanel("Model Builder: OLS vs GLM Gamma (log link)"),
+  titlePanel("Model Builder: OLS vs GLM Gamma (log link) vs Linear Mixed Effects"),
   
   sidebarLayout(
     sidebarPanel(
@@ -97,7 +97,7 @@ ui <- fluidPage(
       ),
       
       conditionalPanel(
-        condition = "input.main_tabs != 'Data Exploration'",
+        condition = "input.main_tabs != 'Data Exploration' && input.main_tabs != 'Linear Mixed Effects'",
         uiOutput("stdy_ui"),
         uiOutput("yst_ui"),
         
@@ -105,7 +105,25 @@ ui <- fluidPage(
         uiOutput("predictors_ui"),
         
         actionButton("run_models", "Run Models")
+      ),
+      
+      conditionalPanel(
+        condition = "input.main_tabs == 'Linear Mixed Effects'",
+        checkboxGroupInput("lme_fixed", "Select fixed effects:",
+                           choices = c("yst", "cump", "estabp"),
+                           selected = c("yst")),
+        
+        selectInput("lme_group", "Random intercept grouping variable:",
+                    choices = c("stdy", "plot"),
+                    selected = "stdy"),
+        
+        checkboxGroupInput("lme_random_slope", "Add random slope for:",
+                           choices = c("yst", "cump", "estabp"),
+                           selected = NULL),
+        
+        actionButton("run_lme", "Run LME Model")
       )
+      
     ),
     
     mainPanel(
@@ -130,7 +148,9 @@ ui <- fluidPage(
         ),
         tabPanel("Model Comparison (AIC)",
                  verbatimTextOutput("model_comparison")
-        )
+        ),
+        tabPanel("Linear Mixed Effects",
+                 verbatimTextOutput("lme_summary"))
       )
     )
   )
@@ -339,6 +359,44 @@ server <- function(input, output, session) {
       cat("Both models have identical AIC values.\n")
     }
   })
+  
+  #Linear Mixed Effects tab
+  observeEvent(input$run_lme, {
+    req(input$lme_fixed, input$lme_group)
+    
+    # Get data
+    df <- data_input() %>% select(ht, stdy, plot, yst, cump, estabp)
+    df <- na.omit(df)
+    
+    # Build fixed effects formula
+    fixed_formula <- paste("ht ~", paste(input$lme_fixed, collapse = " + "))
+    
+    # Build random effects formula
+    if (length(input$lme_random_slope) > 0) {
+      random_formula <- as.formula(paste0("~ ", paste(input$lme_random_slope, collapse = "+"), " | ", input$lme_group))
+    } else {
+      random_formula <- as.formula(paste0("~ 1 | ", input$lme_group))
+    }
+    
+    # Fit the model
+    model <- tryCatch({
+      nlme::lme(fixed = as.formula(fixed_formula),
+                random = random_formula,
+                data = df,
+                na.action = na.omit)
+    }, error = function(e) e)
+    
+    output$lme_summary <- renderPrint({
+      if (inherits(model, "error")) {
+        cat("Model failed to fit:\n")
+        print(model$message)
+      } else {
+        summary(model)
+      }
+    })
+  })
+  
+  
 }
 
 shinyApp(ui, server)
