@@ -10,11 +10,18 @@ response_choices <- c("Height" = "ht",
                       "DBH" = "dbh",
                       "Volume" = "vol")
 
+response_choices_plot2 <- c("Height" = "ht",
+                            "DBH" = "dbh",
+                            "Volume" = "vol",
+                            "Total P" = "totp",
+                            "Cum. P" = "cump")
+
 color_choices <- c(
   "None" = "None",
   "Treatment Code" = "TRT_CODE",
   "Plot (factor)" = "plot_fac",
-  "Study (factor)" = "stdy_fac"
+  "Study (factor)" = "stdy_fac",
+  "Plot Bin (factor)" = "plot_bin"
 )
 
 label_lookup <- c(
@@ -29,7 +36,8 @@ label_lookup <- c(
   plot = "Plot",
   TRT_CODE = "Treatment Code",
   stdy_fac = "Study (factor)",
-  plot_fac = "Plot (factor)"
+  plot_fac = "Plot (factor)",
+  plot_bin = "Plot Bins (facor)"
 )
 
 ui <- fluidPage(
@@ -67,8 +75,7 @@ ui <- fluidPage(
           checkboxGroupInput(inputId = "var_on_plot",
                              label = "Show the following on plot:",
                              choices = NULL,
-                             selected = NULL)
-        ),
+                             selected = NULL)),
         
         tags$br(),
         tags$br(),
@@ -78,8 +85,16 @@ ui <- fluidPage(
         
         selectInput(inputId = "response_var2",
                     label = "Select response variable:", 
-                    choices = response_choices,
-                    selected = "None"),
+                    choices = response_choices_plot2,
+                    selected = "ht"),
+        
+        selectInput("comparison_mode", "Comparison Mode:",
+                    choices = c("Averaged",
+                                "Individual"), selected = "Averaged"),
+        
+        helpText("Note: 'Averaged' means the treatment plots in each plot bin (i.e. the 1000s)
+                 will be averaged together to make one line in this plot. 'Individual' means
+                 each plot will individually be compared to its respective control."),
         
         tags$br(),
         tags$br(),
@@ -93,6 +108,10 @@ ui <- fluidPage(
         
         selectInput(inputId = "yvar",
                     label = "Y-axis variable for Interactive Plot:",
+                    choices = NULL),
+        
+        selectInput("colorvar_plot3",
+                    label = "Color points by:",
                     choices = NULL)
       ),
       
@@ -167,7 +186,12 @@ server <- function(input, output, session) {
         estabp = totp - cump,
         TRT_CODE = substr(plot, 2, 4),
         stdy_fac = as.factor(stdy),
-        plot_fac = as.factor(plot)
+        plot_fac = as.factor(plot),
+        plot_bin = ifelse(
+          !is.na(plot),
+          paste0(substr(as.character(plot), 1, 1), "000s"),
+          NA_character_
+        ) 
       )
     
     df
@@ -194,7 +218,7 @@ server <- function(input, output, session) {
     }
   })
   
-  # ✅ Plot 1: response over time with robust color logic
+  # Plot 1: response over time with robust color logic
   output$resp_over_time <- renderPlotly({
     req(data_input(), input$response_var)
     
@@ -245,22 +269,96 @@ server <- function(input, output, session) {
     ggplotly(gg, tooltip = c("x", "y", "color", "text"))
   })
   
-  # Plot 2 placeholder
+  
+  ##################################################################
+  
+  # Treatment - Control Plot 2
   output$treat_minus_cntrl <- renderPlot({
-    req(data_input())
-    ggplot(data_input(), aes())
+    
+    req(data_input(), input$response_var2, input$comparison_mode)
+    
+    df <- data_input()
+    resp_var <- input$response_var2
+    
+    df <- df %>%
+      mutate(
+        plot = as.character(plot),
+        plot_type = paste0(floor(as.numeric(plot) / 1000) * 1000, "s"),
+        is_control = as.numeric(plot) %% 1000 == 0
+      )
+    
+    control_df <- df %>%
+      filter(is_control) %>%
+      select(plot_type, yst, stdy, control_val = all_of(resp_var))
+    
+    treated_df <- df %>%
+      filter(!is_control) %>%
+      select(plot, plot_type, yst, stdy, treated_val = all_of(resp_var))
+    
+    if (input$comparison_mode == "Averaged") {
+      # Average treatment per plot_type, year, and study
+      treated_summary <- treated_df %>%
+        group_by(plot_type, yst, stdy) %>%
+        summarise(mean_treated = mean(treated_val, na.rm = TRUE), .groups = "drop")
+      
+      combined <- left_join(treated_summary, control_df, by = c("plot_type", "yst", "stdy")) %>%
+        mutate(diff = mean_treated - control_val) %>%
+        # Create a combined label for legend
+        mutate(group_label = paste0(plot_type, " (Study ", stdy, ")"))
+      
+      ggplot(combined, aes(x = yst, y = diff, color = group_label, group = group_label)) +
+        geom_line(size = 1.2) +
+        geom_point() +
+        labs(
+          title = paste("Treatment - Control (Averaged):", label_lookup[[resp_var]]),
+          x = "Year",
+          y = "Difference (Treated - Control)",
+          color = "Plot Type & Study"
+        ) +
+        theme_minimal()
+      
+    } else {
+      # Individual treatment-control differences joined by plot_type, year, study
+      individual <- left_join(treated_df, control_df, by = c("plot_type", "yst", "stdy")) %>%
+        mutate(diff = treated_val - control_val) %>%
+        mutate(group_label = paste0(plot_type, " (Study ", stdy, ")"))
+      
+      ggplot(individual, aes(x = yst, y = diff, group = plot, color = group_label)) +
+        geom_line(alpha = 0.5) +
+        geom_point(alpha = 0.7) +
+        labs(
+          title = paste("Treatment - Control (Individual):", label_lookup[[resp_var]]),
+          x = "Year",
+          y = "Difference (Treated - Control)",
+          color = "Plot Type & Study"
+        ) +
+        theme_minimal()
+    }
   })
   
-  # Update X and Y variable selections for Plot 3
+  
+  
+  
+  
+  
+  
+  
+  ##################################################################
+  
+  # Updates available X and Y variables for interactive plot - plot 3
   observeEvent(data_input(), {
     vars <- names(data_input())
     updateSelectInput(session, "xvar", choices = vars, selected = vars[1])
     updateSelectInput(session, "yvar", choices = vars, selected = vars[2])
+    updateSelectInput(session, "colorvar_plot3", choices = c("None", vars), selected = "None")
+    
   })
   
   # Plot 3: Custom interactive plot
   output$custom_plot <- renderPlot({
     req(data_input(), input$xvar, input$yvar)
+    
+    df <- data_input()
     
     x_label <- label_lookup[[input$xvar]]
     if (is.null(x_label)) x_label <- input$xvar
@@ -268,13 +366,22 @@ server <- function(input, output, session) {
     y_label <- label_lookup[[input$yvar]]
     if (is.null(y_label)) y_label <- input$yvar
     
-    ggplot(data_input(), aes_string(x = input$xvar, y = input$yvar)) +
-      geom_point(alpha = 1) +
-      labs(
-        title = paste(y_label, "vs", x_label),
-        x = x_label,
-        y = y_label
-      )
+    color_label <- if (input$colorvar_plot3 == "None") NULL else input$colorvar_plot3
+    
+    p <- ggplot(df, aes_string(x = input$xvar, y = input$yvar))
+    
+    if (!is.null(color_label) && color_label != "None") {
+      p <- p + geom_point(aes_string(color = color_label), alpha = 0.8)
+    } else {
+      p <- p + geom_point(alpha = 0.8)
+    }
+    
+    p + labs(
+      title = paste(y_label, "vs", x_label),
+      x = x_label,
+      y = y_label,
+      color = color_label
+    )
   })
   
   # Dynamic UI for model tabs
