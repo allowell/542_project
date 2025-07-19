@@ -4,6 +4,7 @@ library(readxl)
 library(ggplot2)
 library(dplyr)
 library(plotly)
+library(tidyverse)
 
 # Labels used for plots
 response_choices <- c("Height" = "ht",
@@ -96,6 +97,15 @@ ui <- fluidPage(
                  will be averaged together to make one line in this plot. 'Individual' means
                  each plot will individually be compared to its respective control."),
         
+        checkboxGroupInput(
+          inputId = "plot2_groups",
+          label = "Select groups to show in Plot 2:",
+          choices = NULL,  # will update dynamically
+          selected = NULL
+        ),
+        
+        
+        
         tags$br(),
         tags$br(),
         tags$br(),
@@ -153,7 +163,7 @@ ui <- fluidPage(
                  plotlyOutput("resp_over_time"),
                  hr(),
                  h3("Plot 2: Treatment - Control"),
-                 plotOutput("treat_minus_cntrl"),
+                 plotlyOutput("treat_minus_cntrl"),
                  hr(),
                  h3("Plot 3: Interactive"),
                  plotOutput("custom_plot")),
@@ -183,7 +193,7 @@ server <- function(input, output, session) {
     df <- read_excel(input$file$datapath, sheet = input$sheet) |>
       select(stdy, plot, yst, cump, totp, dbh, ht, vol) |>
       mutate(
-        estabp = totp - cump,
+        estabp = (as.numeric(totp) - as.numeric(cump)),
         TRT_CODE = substr(plot, 2, 4),
         stdy_fac = as.factor(stdy),
         plot_fac = as.factor(plot),
@@ -197,7 +207,7 @@ server <- function(input, output, session) {
     df
   })
   
-  # Update Treatment Code / Study checkboxes dynamically
+  # Update Treatment Code / Study checkboxes dynamically for plot 1
   observeEvent({
     input$color_var
     data_input()
@@ -273,74 +283,105 @@ server <- function(input, output, session) {
   ##################################################################
   
   # Treatment - Control Plot 2
-  output$treat_minus_cntrl <- renderPlot({
-    
+  # Plot 2 - Treatment minus Control
+  output$treat_minus_cntrl <- renderPlotly({
     req(data_input(), input$response_var2, input$comparison_mode)
     
     df <- data_input()
-    resp_var <- input$response_var2
     
+    # Create plot_num and treatment_status
     df <- df %>%
       mutate(
-        plot = as.character(plot),
-        plot_type = paste0(floor(as.numeric(plot) / 1000) * 1000, "s"),
-        is_control = as.numeric(plot) %% 1000 == 0
+        plot_num = as.numeric(gsub("[^0-9]", "", plot)),
+        treatment_status = ifelse(plot_num %% 1000 == 0, "control", "treated"),
+        plot_bin = paste0(substr(as.character(plot), 1, 1), "000s"),
+        group_label = paste0(plot_bin, " (Study ", stdy, ")")
       )
     
-    control_df <- df %>%
-      filter(is_control) %>%
-      select(plot_type, yst, stdy, control_val = all_of(resp_var))
+    # Debug print: check group_label exists
+    # print(head(df %>% select(plot, plot_num, treatment_status, group_label)))
     
-    treated_df <- df %>%
-      filter(!is_control) %>%
-      select(plot, plot_type, yst, stdy, treated_val = all_of(resp_var))
+    # Filter groups if selected
+    if (!is.null(input$plot2_groups)) {
+      df <- df %>% filter(group_label %in% input$plot2_groups)
+    }
+    
+    response_var <- input$response_var2
     
     if (input$comparison_mode == "Averaged") {
-      # Average treatment per plot_type, year, and study
-      treated_summary <- treated_df %>%
-        group_by(plot_type, yst, stdy) %>%
-        summarise(mean_treated = mean(treated_val, na.rm = TRUE), .groups = "drop")
+      df_summary <- df %>%
+        group_by(stdy, yst, plot_bin, treatment_status) %>%
+        summarise(mean_val = mean(.data[[response_var]], na.rm = TRUE), .groups = "drop") %>%
+        pivot_wider(names_from = treatment_status, values_from = mean_val)
       
-      combined <- left_join(treated_summary, control_df, by = c("plot_type", "yst", "stdy")) %>%
-        mutate(diff = mean_treated - control_val) %>%
-        # Create a combined label for legend
-        mutate(group_label = paste0(plot_type, " (Study ", stdy, ")"))
+      # Ensure both treated and control columns exist
+      if (!all(c("treated", "control") %in% names(df_summary))) {
+        return(NULL)
+      }
       
-      ggplot(combined, aes(x = yst, y = diff, color = group_label, group = group_label)) +
-        geom_line(size = 1.2) +
-        geom_point() +
+      df_summary <- df_summary %>%
+        mutate(diff = treated - control,
+               group_label = paste0(plot_bin, " (Study ", stdy, ")"))
+      
+      p <- ggplot(df_summary, aes(x = yst, y = diff, color = group_label, group = group_label)) +
+        geom_line(size = 1) +
         labs(
-          title = paste("Treatment - Control (Averaged):", label_lookup[[resp_var]]),
+          title = "Averaged Treatment - Control",
           x = "Year",
-          y = "Difference (Treated - Control)",
-          color = "Plot Type & Study"
-        ) +
-        theme_minimal()
+          y = paste("Difference in", label_lookup[[response_var]]),
+          color = "Group (Plot Bin & Study)"
+        )
       
     } else {
-      # Individual treatment-control differences joined by plot_type, year, study
-      individual <- left_join(treated_df, control_df, by = c("plot_type", "yst", "stdy")) %>%
-        mutate(diff = treated_val - control_val) %>%
-        mutate(group_label = paste0(plot_type, " (Study ", stdy, ")"))
+      # Individual mode
       
-      ggplot(individual, aes(x = yst, y = diff, group = plot, color = group_label)) +
-        geom_line(alpha = 0.5) +
-        geom_point(alpha = 0.7) +
+      df_control <- df %>%
+        filter(treatment_status == "control") %>%
+        select(stdy, yst, plot_bin, control_val = .data[[response_var]])
+      
+      df_treated <- df %>%
+        filter(treatment_status == "treated") %>%
+        select(stdy, yst, plot_bin, plot, treated_val = .data[[response_var]])
+      
+      df_joined <- df_treated %>%
+        left_join(df_control, by = c("stdy", "yst", "plot_bin")) %>%
+        mutate(diff = treated_val - control_val) %>%
+        filter(!is.na(diff)) %>%
+        mutate(group_label = paste0(plot_bin, " (Study ", stdy, ")"))
+      
+      # Debug print: check df_joined columns
+      # print(head(df_joined))
+      
+      p <- ggplot(df_joined, aes(x = yst, y = diff, group = plot, color = group_label)) +
+        geom_line(alpha = 0.7) +
         labs(
-          title = paste("Treatment - Control (Individual):", label_lookup[[resp_var]]),
+          title = "Individual Treatment - Control",
           x = "Year",
-          y = "Difference (Treated - Control)",
-          color = "Plot Type & Study"
-        ) +
-        theme_minimal()
+          y = paste("Difference in", label_lookup[[response_var]]),
+          color = "Group (Plot Bin & Study)"
+        )
     }
+    
+    ggplotly(p)
   })
   
   
+
   
   
   
-  
+
+  # dynamically change the checkbox options for plot 2
+  observeEvent(data_input(), {
+    df <- data_input()
+    
+    groups <- unique(paste0(df$plot_bin, " (Study ", df$stdy, ")"))
+    groups <- sort(groups)
+    
+    updateCheckboxGroupInput(session, "plot2_groups",
+                             choices = groups,
+                             selected = groups)  # select all by default
+  })
   
   
   ##################################################################
