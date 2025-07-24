@@ -138,19 +138,33 @@ ui <- fluidPage(
       
       conditionalPanel(
         condition = "input.main_tabs == 'Linear Mixed Effects'",
-        checkboxGroupInput("lme_fixed", "Select fixed effects:",
-                           choices = c("yst", "cump", "estabp"),
+        
+        selectInput("lme_resp", "Select Response Variable:",
+                    choices = c("ht", "dbh", "vol"),
+                    selected = "ht"),
+        
+        checkboxGroupInput("lme_fixed", "Select Fixed Effect(s):",
+                           choices = c("yst", "cump", "estabp", "totp"),
                            selected = c("yst")),
         
-        selectInput("lme_group", "Random intercept grouping variable:",
-                    choices = c("stdy", "plot"),
-                    selected = "stdy"),
+        radioButtons("lme_group", "Random intercept grouping variable(s):",
+                           choices = list("stdy" = "stdy",
+                                          "stdy/plot (nested)" = "nested"),
+                           selected = "stdy"),
         
-        checkboxGroupInput("lme_random_slope", "Add random slope for:",
-                           choices = c("yst", "cump", "estabp"),
+        conditionalPanel(
+          condition = "input.lme_group == 'nested'",
+          selectInput("lme_study_filter", "Select Study to Analyze:",
+                      choices = NULL,  # updated in server
+                      selected = NULL)
+        ),
+        
+        checkboxGroupInput("lme_random_slope_vars", "Select random slope variable(s):",
+                           choices = c("yst", "cump", "estabp", "totp"),
                            selected = NULL),
         
         actionButton("run_lme", "Run LME Model")
+        
       )
       
     ),
@@ -179,7 +193,9 @@ ui <- fluidPage(
                  verbatimTextOutput("model_comparison")
         ),
         tabPanel("Linear Mixed Effects",
-                 verbatimTextOutput("lme_summary"))
+                 verbatimTextOutput("lme_summary"),
+                 plotOutput("lme_effects_plot"),
+                 plotOutput("lme_fit_obs_plot"))
       )
     )
   )
@@ -509,21 +525,67 @@ server <- function(input, output, session) {
   })
   
   #Linear Mixed Effects tab
+  
+  observe({
+    df <- data_input()
+    updateSelectInput(inputId = "lme_study_filter",
+                      choices = sort(unique(df$stdy)),
+                      selected = unique(df$stdy)[1])
+  })
+  
   observeEvent(input$run_lme, {
-    req(input$lme_fixed, input$lme_group)
+    req(input$lme_fixed, input$lme_group, input$lme_resp)
     
     # Get data
-    df <- data_input() %>% select(ht, stdy, plot, yst, cump, estabp)
-    df <- na.omit(df)
+    df <- data_input() %>%
+      select(all_of(c(input$lme_resp, "stdy", "plot", "yst", "cump", "estabp", "totp"))) %>%
+      na.omit()
+    
+    # Handle filtering based on nested grouping or slope choices
+    if (input$lme_group == "nested") {
+      req(input$lme_study_filter)
+      df <- df %>% filter(stdy == input$lme_study_filter)
+    }
+      
+      # Already filtered df above, so just check data counts here
+      n_obs <- nrow(df)
+      n_plot <- length(unique(df$plot))
+      
+      if (n_obs <= n_plot) {
+        showNotification("Not enough data per plot to fit the model. Try a different study.", type = "error")
+        return(NULL)
+      }
     
     # Build fixed effects formula
-    fixed_formula <- paste("ht ~", paste(input$lme_fixed, collapse = " + "))
+    fixed_formula <- paste(input$lme_resp, "~", paste(input$lme_fixed, collapse = " + "))
+    
     
     # Build random effects formula
-    if (length(input$lme_random_slope) > 0) {
-      random_formula <- as.formula(paste0("~ ", paste(input$lme_random_slope, collapse = "+"), " | ", input$lme_group))
-    } else {
-      random_formula <- as.formula(paste0("~ 1 | ", input$lme_group))
+    if (input$lme_group == "nested") {
+      # Nested structure: plot within study (stdy/plot)
+      
+      if (length(input$lme_random_slope_vars) > 0) {
+        # Random slope(s) for plot (within selected study)
+        random_formula <- as.formula(
+          paste0("~ ", paste(input$lme_random_slope_vars, collapse = " + "), " | plot")
+        )
+      } else {
+        # Random intercept for plot within a single study
+        random_formula <- as.formula("~ 1 | plot")
+      }
+      
+    } else if (input$lme_group == "stdy") {
+      # Grouping by study only
+      
+      if (length(input$lme_random_slope_vars) > 0) {
+        # Random slopes for selected variables by study
+        random_formula <- as.formula(
+          paste0("~ ", paste(input$lme_random_slope_vars, collapse = " + "), " | stdy")
+        )
+      } else {
+        # Random intercept only for study
+        random_formula <- as.formula("~ 1 | stdy")
+      }
     }
     
     # Fit the model
@@ -531,7 +593,7 @@ server <- function(input, output, session) {
       nlme::lme(fixed = as.formula(fixed_formula),
                 random = random_formula,
                 data = df,
-                na.action = na.omit)
+                na.action = na.omit, method = "ML")
     }, error = function(e) e)
     
     output$lme_summary <- renderPrint({
@@ -542,6 +604,27 @@ server <- function(input, output, session) {
         summary(model)
       }
     })
+    
+    #Fixed + Random Effects Plot
+    output$lme_effects_plot <- renderPlot({
+      if (!inherits(model, "error")) {
+        plot(nlme::ranef(model), main = "Random Effects Estimates")
+      }
+    })
+    
+    #Fitted vs Observed plot
+    output$lme_fit_obs_plot <- renderPlot({
+      if (!inherits(model, "error")) {
+        ggplot(data = data.frame(Fitted = fitted(model),
+                                 Observed = df[[input$lme_resp]]),
+               aes(x = Fitted, y = Observed)) +
+          geom_point(alpha = 0.6) +
+          geom_abline(slope = 1, intercept = 0, color = "red") +
+          theme_minimal() +
+          labs(title = "Fitted vs Observed", x = "Fitted Values", y = "Observed Values")
+      }
+    })
+    
   })
   
   

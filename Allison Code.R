@@ -3,6 +3,7 @@
 #library(lme4)
 #library(Matrix)
 library(nlme)
+library(dplyr)
 #Deciding to treat estabp as a binary for right now to look at comparison
 #between sites with no carryover versus any carryover
 
@@ -23,8 +24,13 @@ df <- hyp1 |>
 m_mod1 <- lmer(ht ~ totp_sc * estabp_bin + (1 | stdy/plot), data = df)
 
 #Second model
-hyp1_complete <- na.omit(hyp1[, c("ht", "yst", "cump", "estabp", "stdy", "plot")])
-model <- lme(ht ~ yst + cump + estabp, 
+hyp1_complete <- na.omit(hyp1[, c("ht", "yst", "cump", "estabp", "stdy", "plot", "totp")])
+model <- lme(ht ~ estabp + totp + totp:estabp, 
+             random = ~ 1 | stdy, data = hyp1_complete)
+summary(model)
+ranef(model)
+
+model <- lme(ht ~ cump + estabp, 
              random = ~ 1 | stdy, data = hyp1_complete)
 summary(model)
 ranef(model)
