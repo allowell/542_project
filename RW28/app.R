@@ -163,8 +163,20 @@ ui <- fluidPage(
                            choices = c("yst", "cump", "estabp", "totp"),
                            selected = NULL),
         
-        actionButton("run_lme", "Run LME Model")
+        actionButton("run_lme", "Run LME Model"),
         
+        tags$div(
+          style = "margin-top: 20px; padding: 10px; border: 1px solid #ccc; background-color: #f9f9f9; border-radius: 5px;",
+          tags$strong("Note on Model Fitting:"),
+          tags$p("Not all combinations of fixed and random effects may be supported by the data. If the model fails to fit:"),
+          tags$ul(
+            tags$li("Try reducing the number of random slopes."),
+            tags$li("Try reducing the total number of fixed and random effects"),
+            tags$li("Avoid selecting all predictors as both fixed and random effects."),
+            tags$li("Ensure there are enough observations per group.")
+          ),
+          tags$p("This app gives you full control over model specification. If the model fails, check the error message to the right and try adjusting your inputs.")
+        )
       )
       
     ),
